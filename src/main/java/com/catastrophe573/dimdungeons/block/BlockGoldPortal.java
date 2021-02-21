@@ -31,6 +31,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.particles.ParticleTypes;
 import net.minecraft.tileentity.BannerPattern;
 //import net.minecraft.tileentity.BannerTileEntity;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.IBlockReader;
@@ -112,50 +113,62 @@ public class BlockGoldPortal extends BreakableBlock
 	    return;
 	}
 
-	// manually check/use portal 
+	// manually check/use portal
 	if (entityIn.func_242280_ah()) // unmapped name of isEntityPortalCooldownActive()
 	{
 	    return;
-	}	
+	}
 
 	if (!entityIn.isPassenger() && !entityIn.isBeingRidden() && entityIn.isNonBoss())
 	{
 	    //DimDungeons.LOGGER.info("Entity " + entityIn.getName().getString() + " just entered a gold portal.");
 
-	    TileEntityPortalKeyhole te = findKeyholeForThisPortal(state, worldIn, pos);
-	    if (te != null)
-	    {
-		ItemStack item = te.getObjectInserted();
-		if (!item.isEmpty())
-		{
-		    // World.field_234918_g_ is the Overworld. This block has different behavior in the Overworld than in the Dungeon Dimension
-		    if (item.getItem() instanceof ItemPortalKey && DungeonUtils.isDimensionOverworld(worldIn))
-		    {
-			ItemPortalKey key = (ItemPortalKey) item.getItem();
-			float warpX = key.getWarpX(item);
-			float warpZ = key.getWarpZ(item);
+	    //TileEntityPortalKeyhole te = findKeyholeForThisPortal(state, worldIn, pos);
+	    TileEntity tile = worldIn.getTileEntity(pos);
 
-			if (warpX == -1 || warpZ == -1)
-			{
-			    System.out.println("Player somehow used an unactivated key? Doing nothing.");
-			}
-			else
-			{
-			    System.out.println("Player used a key to teleport to dungeon at (" + warpX + ", " + warpZ + ").");
-			    actuallyPerformTeleport((ServerPlayerEntity) entityIn, DungeonUtils.getDungeonWorld(worldIn.getServer()), warpX + 0.5f, 55.1D, warpZ + 0.5f, 0);
-			}
+	    if (tile != null && tile instanceof TileEntityGoldPortal)
+	    {
+		TileEntityGoldPortal te = (TileEntityGoldPortal) worldIn.getTileEntity(pos);
+
+		BlockPos destination = te.getDestination();
+		float warpX = destination.getX();
+		float warpY = destination.getY();
+		float warpZ = destination.getZ();
+
+		if (DungeonUtils.isDimensionOverworld(worldIn))
+		{
+		    // intentionally don't add 0.5f to the X, so the player is centered between the two blocks of the doorway
+		    System.out.println("Player used a key to teleport to dungeon at (" + warpX + ", " + warpZ + ").");
+		    actuallyPerformTeleport((ServerPlayerEntity) entityIn, DungeonUtils.getDungeonWorld(worldIn.getServer()), warpX, 55.1D, warpZ + 0.5f, 0);
+		}
+		else if (worldIn.getDimensionKey() == DungeonUtils.getDungeonWorld(worldIn.getServer()).getDimensionKey())
+		{
+		    // first check for an unassigned gold portal block
+		    if (destination.getX() == 0 && destination.getZ() == 0)
+		    {
+			sendPlayerBackHome((ServerPlayerEntity) entityIn);
+		    }
+		    else
+		    {
+			//System.out.println("Player is returning from a dungeon at (" + warpX + " " + warpY + " " + warpZ + ").");
+			ServerPlayerEntity player = (ServerPlayerEntity) entityIn;
+			actuallyPerformTeleport(player, player.getServer().getWorld(World.OVERWORLD), warpX + 0.5f, warpY + 0.5f, warpZ + 0.5f, 0);
 		    }
 		}
 	    }
-	    else
-	    {
-		// no keyhole? this could be a return portal
-		if (worldIn.getDimensionKey() == DungeonUtils.getDungeonWorld(worldIn.getServer()).getDimensionKey())
-		{
-		    sendPlayerBackHome((ServerPlayerEntity) entityIn);
-		}
-	    }
 	}
+    }
+
+    @Override
+    public boolean hasTileEntity(BlockState state)
+    {
+	return true;
+    }
+
+    @Override
+    public TileEntity createTileEntity(BlockState state, IBlockReader world)
+    {
+	return new TileEntityGoldPortal();
     }
 
     protected Entity actuallyPerformTeleport(ServerPlayerEntity player, ServerWorld dim, double x, double y, double z, double yaw)
@@ -166,7 +179,7 @@ public class BlockGoldPortal extends BreakableBlock
 	float destPitch = player.getPitchYaw().x;
 	float destYaw = player.getPitchYaw().y;
 
-	// if the player just entered a dungeon then force them to face north 
+	// if the player just entered a dungeon then force them to face north
 	if (DungeonUtils.isDimensionDungeon(dim))
 	{
 	    destPitch = 0;
@@ -179,6 +192,7 @@ public class BlockGoldPortal extends BreakableBlock
 	return player;
     }
 
+    // this is now only used a fail safe in case a BlockGoldPortal somehow ends up 'unassigned' (such as a world being imported from 1.15)
     protected void sendPlayerBackHome(ServerPlayerEntity player)
     {
 	float lastX = 0;
@@ -457,8 +471,8 @@ public class BlockGoldPortal extends BreakableBlock
 
     /**
      * Called periodically client side on blocks near the player to show effects (like furnace fire particles). Note that
-     * this method is unrelated to {@link randomTick} and {@link #needsRandomTick}, and will always be called regardless of
-     * whether the block can receive random update ticks
+     * this method is unrelated to randomTick and needsRandomTick, and will always be called regardless of whether the block
+     * can receive random update ticks
      */
     @OnlyIn(Dist.CLIENT)
     public void animateTick(BlockState stateIn, World worldIn, BlockPos pos, Random rand)

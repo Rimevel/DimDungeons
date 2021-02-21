@@ -8,6 +8,7 @@ import javax.annotation.Nullable;
 import com.catastrophe573.dimdungeons.DimDungeons;
 import com.catastrophe573.dimdungeons.DungeonConfig;
 import com.catastrophe573.dimdungeons.item.ItemPortalKey;
+import com.catastrophe573.dimdungeons.utils.DungeonGenData;
 import com.catastrophe573.dimdungeons.utils.DungeonUtils;
 
 import net.minecraft.block.Block;
@@ -138,33 +139,45 @@ public class BlockPortalKeyhole extends Block
 		{
 		    // DimDungeons.LOGGER.info("Putting " + playerItem.getDisplayName().getString() + " inside keyhole...");
 
-		    // should we build the dungeon on the other side?		    
+		    // should we build the dungeon on the other side?
 		    if (playerItem.getItem() instanceof ItemPortalKey && !worldIn.isRemote)
 		    {
+			DungeonGenData genData = DungeonGenData.Create().setKeyItem(playerItem).setReturnPoint(getReturnPoint(state, pos));
+			ItemPortalKey key = (ItemPortalKey) playerItem.getItem();
+
 			if (shouldBuildDungeon(playerItem))
 			{
-			    DimDungeons.LOGGER.info("BUILDING A NEW DUNGEON!");
-			    DungeonUtils.buildDungeon(worldIn, playerItem);
+			    //DimDungeons.LOGGER.info("BUILDING A NEW DUNGEON!");
+			    DungeonUtils.buildDungeon(worldIn, genData);
 			    playerItem.getTag().putBoolean(ItemPortalKey.NBT_BUILT, true);
+			}
+
+			// regardless of if this is a new or old dungeon, reprogram the exit door
+			if (key != null)
+			{
+			    float entranceX = key.getWarpX(playerItem);
+			    float entranceZ = key.getWarpZ(playerItem);
+			    DungeonUtils.reprogramExistingExitDoorway(worldIn, (long)entranceX, (long)entranceZ, genData);
 			}
 		    }
 
 		    myEntity.setContents(playerItem.copy());
-		    playerItem.shrink(1);
 
 		    // recalculate the boolean block states
 		    BlockState newBlockState = state.with(FACING, state.get(FACING)).with(FILLED, myEntity.isFilled()).with(LIT, myEntity.isActivated());
 		    worldIn.setBlockState(pos, newBlockState);
 
-		    // this function prints no message on success
-		    checkForProblemsAndLiterallySpeakToPlayer(worldIn, pos, state, myEntity, player);
-
 		    // should portal blocks be spawned?
 		    if (isOkayToSpawnPortalBlocks(worldIn, pos, state, myEntity))
 		    {
-			worldIn.setBlockState(pos.down(), BlockRegistrar.block_gold_portal.getDefaultState());
-			worldIn.setBlockState(pos.down(2), BlockRegistrar.block_gold_portal.getDefaultState());
+			addGoldenPortalBlock(worldIn, pos.down(), playerItem);
+			addGoldenPortalBlock(worldIn, pos.down(2), playerItem);
 		    }
+
+		    // this function prints no message on success
+		    checkForProblemsAndLiterallySpeakToPlayer(worldIn, pos, state, myEntity, player);
+
+		    playerItem.shrink(1);
 
 		    return ActionResultType.SUCCESS;
 		}
@@ -191,7 +204,40 @@ public class BlockPortalKeyhole extends Block
 		return ActionResultType.SUCCESS;
 	    }
 	}
+
 	return ActionResultType.PASS;
+    }
+
+    protected void addGoldenPortalBlock(World worldIn, BlockPos pos, ItemStack keyStack)
+    {
+	worldIn.setBlockState(pos, BlockRegistrar.block_gold_portal.getDefaultState());
+	TileEntityGoldPortal te = (TileEntityGoldPortal) worldIn.getTileEntity(pos);
+	if (te != null && te instanceof TileEntityGoldPortal)
+	{
+	    ItemPortalKey key = (ItemPortalKey) keyStack.getItem();
+	    if (key != null)
+	    {
+		te.setDestination(key.getWarpX(keyStack), 55.1D, key.getWarpZ(keyStack));
+	    }
+	}
+    }
+
+    protected BlockPos getReturnPoint(BlockState state, BlockPos pos)
+    {
+	Direction dir = (Direction) state.get(FACING);
+	switch (dir)
+	{
+	case WEST:
+	    return pos.west().down(2);
+	case EAST:
+	    return pos.east().down(2);
+	case NORTH:
+	    return pos.north().down(2);
+	case SOUTH:
+	    return pos.south().down(2);
+	default:
+	    return pos.down(2);
+	}
     }
 
     // helper function for checkForPortalCreation

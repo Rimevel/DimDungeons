@@ -3,10 +3,15 @@ package com.catastrophe573.dimdungeons.structure;
 import java.util.Random;
 
 import com.catastrophe573.dimdungeons.DimDungeons;
+import com.catastrophe573.dimdungeons.DungeonConfig;
 import com.catastrophe573.dimdungeons.block.BlockRegistrar;
+import com.catastrophe573.dimdungeons.block.TileEntityGoldPortal;
+import com.catastrophe573.dimdungeons.block.TileEntityLocalTeleporter;
 import com.catastrophe573.dimdungeons.block.TileEntityPortalKeyhole;
 import com.catastrophe573.dimdungeons.item.ItemPortalKey;
 import com.catastrophe573.dimdungeons.structure.DungeonBuilderLogic.DungeonRoom;
+import com.catastrophe573.dimdungeons.structure.DungeonBuilderLogic.DungeonType;
+import com.catastrophe573.dimdungeons.utils.DungeonGenData;
 import com.catastrophe573.dimdungeons.utils.DungeonUtils;
 
 import net.minecraft.block.BlockState;
@@ -28,6 +33,7 @@ import net.minecraft.state.properties.StructureMode;
 import net.minecraft.tileentity.BarrelTileEntity;
 import net.minecraft.tileentity.ChestTileEntity;
 import net.minecraft.tileentity.DispenserTileEntity;
+import net.minecraft.tileentity.LockableLootTileEntity;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.Mirror;
 import net.minecraft.util.ResourceLocation;
@@ -55,10 +61,10 @@ public class DungeonPlacementLogicAdvanced
     {
     }
 
-    public static boolean place(ServerWorld world, long x, long z)
+    public static boolean place(ServerWorld world, long x, long z, DungeonGenData genData)
     {
-	long entranceChunkX = (x/16)+8;
-	long entranceChunkZ = (z/16)+11;
+	long entranceChunkX = (x / 16) + 8;
+	long entranceChunkZ = (z / 16) + 11;
 	if (!isEntranceChunk(entranceChunkX, entranceChunkZ))
 	{
 	    DimDungeons.LOGGER.error("DIMDUNGEONS FATAL ERROR: advanced dungeon does not start at " + x + ", " + z);
@@ -67,7 +73,7 @@ public class DungeonPlacementLogicAdvanced
 	DimDungeons.LOGGER.debug("DIMDUNGEONS START ADVANCED STRUCTURE at " + x + ", " + z);
 
 	// this is the data structure for an entire dungeon
-	DungeonBuilderLogic dbl = new DungeonBuilderLogic(world.getRandom(), entranceChunkX, entranceChunkZ);
+	DungeonBuilderLogic dbl = new DungeonBuilderLogic(world.getRandom(), entranceChunkX, entranceChunkZ, DungeonType.ADVANCED);
 	dbl.calculateDungeonShape(42);
 
 	// place all 64 rooms (many will be blank), for example the entrance room is at [4][7] in this array
@@ -84,9 +90,9 @@ public class DungeonPlacementLogicAdvanced
 		{
 		    // calculate the chunkpos of the room at 0,0 in the top left of the map
 		    // I'm not sure what the +4 is for, but it is needed
-		    ChunkPos cpos = new ChunkPos(((int)x/16) + i + 4, ((int)z/16) + j + 4);
-		    
-		    if (!putRoomHere(cpos, world, nextRoom))
+		    ChunkPos cpos = new ChunkPos(((int) x / 16) + i + 4, ((int) z / 16) + j + 4);
+
+		    if (!putRoomHere(cpos, world, nextRoom, genData))
 		    {
 			DimDungeons.LOGGER.error("DIMDUNGEONS ERROR UNABLE TO PLACE STRUCTURE: " + nextRoom.structure);
 		    }
@@ -124,12 +130,12 @@ public class DungeonPlacementLogicAdvanced
     }
 
     // used by the place() function to actually place rooms
-    public static boolean putRoomHere(ChunkPos cpos, IWorld world, DungeonRoom room)
+    public static boolean putRoomHere(ChunkPos cpos, IWorld world, DungeonRoom room, DungeonGenData genData)
     {
 	MinecraftServer minecraftserver = ((World) world).getServer();
 	TemplateManager templatemanager = DungeonUtils.getDungeonWorld(minecraftserver).getStructureTemplateManager();
 
-	Template template = templatemanager.getTemplate(new ResourceLocation(DimDungeons.RESOURCE_PREFIX + room.structure));
+	Template template = templatemanager.getTemplate(new ResourceLocation(room.structure));
 	PlacementSettings placementsettings = (new PlacementSettings()).setMirror(Mirror.NONE).setRotation(Rotation.NONE).setIgnoreEntities(false).setChunk(cpos);
 	placementsettings.setBoundingBox(placementsettings.getBoundingBox());
 
@@ -182,7 +188,7 @@ public class DungeonPlacementLogicAdvanced
 		StructureMode structuremode = StructureMode.valueOf(template$blockinfo.nbt.getString("mode"));
 		if (structuremode == StructureMode.DATA)
 		{
-		    handleDataBlock(template$blockinfo.nbt.getString("metadata"), template$blockinfo.pos, world, world.getRandom(), placementsettings.getBoundingBox());
+		    handleDataBlock(template$blockinfo.nbt.getString("metadata"), template$blockinfo.pos, world, world.getRandom(), placementsettings.getBoundingBox(), genData);
 		}
 	    }
 	}
@@ -215,7 +221,7 @@ public class DungeonPlacementLogicAdvanced
 	}
 
 	// this is the date structure for an entire dungeon
-	DungeonBuilderLogic dbl = new DungeonBuilderLogic(random, entranceX, entranceZ);
+	DungeonBuilderLogic dbl = new DungeonBuilderLogic(random, entranceX, entranceZ, DungeonType.ADVANCED);
 
 	//	// trigger some debug code for test layouts
 	//	if (world.getWorldInfo().getWorldName().equalsIgnoreCase("DimDungeonsDebugOne"))
@@ -262,13 +268,30 @@ public class DungeonPlacementLogicAdvanced
     }
 
     // resembles TemplateStructurePiece.handleDataMarker()
-    protected static void handleDataBlock(String name, BlockPos pos, IWorld world, Random rand, MutableBoundingBox bb)
+    protected static void handleDataBlock(String name, BlockPos pos, IWorld world, Random rand, MutableBoundingBox bb, DungeonGenData genData)
     {
 	//DimDungeons.LOGGER.info("DATA BLOCK NAME: " + name);
 
 	if ("ReturnPortal".equals(name))
 	{
-	    world.setBlockState(pos, BlockRegistrar.block_gold_portal.getDefaultState(), 2); // erase this data block 
+	    world.setBlockState(pos, BlockRegistrar.block_gold_portal.getDefaultState(), 2); // erase this data block
+	    TileEntityGoldPortal te = (TileEntityGoldPortal) world.getTileEntity(pos);
+	    if (te != null)
+	    {
+		te.setDestination(genData.returnPoint.getX() + 0.5D, genData.returnPoint.getY() + 0.1D, genData.returnPoint.getZ() + 0.5D);
+	    }
+	}
+	else if ("BackToEntrance".equals(name))
+	{
+	    world.setBlockState(pos, BlockRegistrar.block_local_teleporter.getDefaultState(), 2); // erase this data block
+	    TileEntityLocalTeleporter te = (TileEntityLocalTeleporter) world.getTileEntity(pos);
+	    if (te != null)
+	    {
+		ItemPortalKey key = (ItemPortalKey) genData.keyItem.getItem();
+		double entranceX = key.getWarpX(genData.keyItem);
+		double entranceZ = key.getWarpZ(genData.keyItem);
+		te.setDestination(entranceX, 55.1D, entranceZ, 0.0f, 180.0f);
+	    }
 	}
 	else if ("LockItStoneBrick".equals(name))
 	{
@@ -277,7 +300,7 @@ public class DungeonPlacementLogicAdvanced
 	else if ("LockIt".equals(name))
 	{
 	    // do nothing!
-	}	
+	}
 	else if ("FortuneTeller".equals(name))
 	{
 	    world.setBlockState(pos, Blocks.STONE_BRICKS.getDefaultState(), 2); // erase this data block 
@@ -323,6 +346,15 @@ public class DungeonPlacementLogicAdvanced
 	    }
 	    else
 	    {
+		// actually within that 70% of nothing, if Artifacts is installed, then have a 10% chance of a mimic!
+		if ( DungeonConfig.isModInstalled("artifacts") )
+		{
+		    if ( lucky < 40 )
+		    {
+			spawnMimicFromArtifactsMod(pos, "mimic", world);			
+		    }
+		}
+		
 		world.setBlockState(pos, Blocks.AIR.getDefaultState(), 2); // erase this data block 
 		world.setBlockState(pos.down(), Blocks.AIR.getDefaultState(), 2); // and erase the chest below it
 	    }
@@ -330,12 +362,7 @@ public class DungeonPlacementLogicAdvanced
 	else if ("SetTrappedLoot".equals(name))
 	{
 	    world.setBlockState(pos, Blocks.AIR.getDefaultState(), 2); // erase this data block
-	    ChestTileEntity te = (ChestTileEntity) world.getTileEntity(pos.down());
-	    if (te != null)
-	    {
-		te.clear();
-		te.setLootTable(new ResourceLocation(DimDungeons.RESOURCE_PREFIX + "chests/chestloot_3"), rand.nextLong());
-	    }
+	    LockableLootTileEntity.setLootTable(world, rand, pos, new ResourceLocation(DimDungeons.RESOURCE_PREFIX + "chests/chestloot_3"));
 	}
 	else if ("BarrelLoot1".equals(name))
 	{
@@ -560,30 +587,21 @@ public class DungeonPlacementLogicAdvanced
 	faceContainerTowardsAir(world, pos.down());
 
 	// set the loot table
-	TileEntity te = world.getTileEntity(pos.down());
-	if (te instanceof ChestTileEntity)
-	{
-	    ((ChestTileEntity) te).clear();
-	    ((ChestTileEntity) te).setLootTable(lootTable, rand.nextLong());
-	}
-	else
+	LockableLootTileEntity.setLootTable(world, rand, pos.down(), lootTable);
+	if (!(world.getTileEntity(pos.down()) instanceof ChestTileEntity))
 	{
 	    DimDungeons.LOGGER.info("DIMDUNGEONS: FAILED TO PLACE CHEST IN DUNGEON. pos = " + pos.getX() + ", " + pos.getZ());
 	}
     }
 
+    // probably do not need this anymore
     private static void fillBarrelBelow(BlockPos pos, ResourceLocation lootTable, IWorld world, Random rand)
     {
 	world.setBlockState(pos, Blocks.AIR.getDefaultState(), 2); // erase this data block
 
 	// set the loot table
-	TileEntity te = world.getTileEntity(pos.down());
-	if (te instanceof BarrelTileEntity)
-	{
-	    ((BarrelTileEntity) te).clear();
-	    ((BarrelTileEntity) te).setLootTable(lootTable, rand.nextLong());
-	}
-	else
+	LockableLootTileEntity.setLootTable(world, rand, pos.down(), lootTable);
+	if (!(world.getTileEntity(pos.down()) instanceof BarrelTileEntity))
 	{
 	    DimDungeons.LOGGER.info("DIMDUNGEONS: FAILED TO PLACE BARREL IN DUNGEON. pos = " + pos.getX() + ", " + pos.getZ());
 	}
@@ -646,4 +664,24 @@ public class DungeonPlacementLogicAdvanced
 	    world.setBlockState(pos, bs, 2);
 	}
     }
+    
+    private static void spawnMimicFromArtifactsMod(BlockPos pos, String casualName, IWorld world)    
+    {
+	MobEntity mob = null;
+	
+	if ( !DungeonConfig.isModInstalled("artifacts") )
+	{
+	    return; // fail safe
+	}
+	
+	mob = (MobEntity)EntityType.byKey("artifacts:mimic").get().create((World) world);
+	mob.setPosition(pos.getX(), pos.getY(), pos.getZ());
+	
+	mob.setCanPickUpLoot(false);
+	mob.moveToBlockPosAndAngles(pos, 0.0F, 0.0F);
+	mob.enablePersistence();
+
+	mob.onInitialSpawn((IServerWorld) world, world.getDifficultyForLocation(pos), SpawnReason.STRUCTURE, (ILivingEntityData) null, (CompoundNBT) null);
+	world.addEntity(mob);	
+    }    
 }
